@@ -21,12 +21,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.rememberAsyncImagePainter
+import coil.request.ImageRequest
 
 private val WarmAmber = Color(0xFFE1A84B)
 private val WarmAmberDark = Color(0xFF5A421C)
@@ -138,8 +140,14 @@ private fun SearchForm(query: String, update: (String) -> Unit, search: () -> Un
 
 @Composable
 private fun SuggestionCard(game: SearchResult, select: () -> Unit) {
-    val coverUrl = game.image_url?.let {
-        if (it.startsWith("/")) BuildConfig.API_BASE_URL.trimEnd('/') + it else it
+    val context = LocalContext.current
+    val coverRequest = game.image_url?.let {
+        ImageRequest.Builder(context)
+            .data(it)
+            .setHeader("Referer", "https://www.metacritic.com/")
+            .setHeader("User-Agent", "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36")
+            .crossfade(true)
+            .build()
     }
     Card(Modifier.fillMaxWidth().clickable(onClick = select), shape = RoundedCornerShape(18.dp)) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -150,9 +158,9 @@ private fun SuggestionCard(game: SearchResult, select: () -> Unit) {
                     .background(Color(0xFF47484A)),
                 contentAlignment = Alignment.Center,
             ) {
-                if (coverUrl != null) {
+                if (coverRequest != null) {
                     Image(
-                        painter = rememberAsyncImagePainter(coverUrl),
+                        painter = rememberAsyncImagePainter(coverRequest),
                         contentDescription = "${game.title} cover",
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop,

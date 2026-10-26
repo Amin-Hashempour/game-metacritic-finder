@@ -65,17 +65,46 @@ class MetacriticProvider:
             return cached[1], cached[2]
         session = AsyncSession(impersonate="chrome")
         try:
-            response = await session.get(f"{SITE_BASE}{path}", timeout=25)
+            response = await session.get(
+                f"{SITE_BASE}{path}",
+                timeout=25,
+                headers={
+                    "Accept": "image/jpeg,image/png,image/webp,image/avif,image/*;q=0.8,*/*;q=0.5",
+                    "Referer": f"{SITE_BASE}/",
+                },
+            )
             if response.status_code >= 400:
                 raise SourceUnavailable("Game artwork is temporarily unavailable")
-            content_type = response.headers.get("content-type", "image/jpeg").split(";")[0]
-            if content_type not in {"image/jpeg", "image/png", "image/webp"}:
-                raise SourceUnavailable("Metacritic returned an invalid image")
             content = bytes(response.content)
+            content_type = self._image_media_type(
+                content,
+                response.headers.get("content-type", ""),
+                path,
+            )
+            if not content_type:
+                raise SourceUnavailable("Metacritic returned an invalid image")
             self._image_cache[path] = (now + 86400, content, content_type)
             return content, content_type
         finally:
             await session.close()
+
+    @staticmethod
+    def _image_media_type(content: bytes, header: str, path: str) -> str | None:
+        declared = header.split(";", 1)[0].strip().lower()
+        if content.startswith(b"\xff\xd8\xff"):
+            return "image/jpeg"
+        if content.startswith(b"\x89PNG\r\n\x1a\n"):
+            return "image/png"
+        if content.startswith(b"RIFF") and content[8:12] == b"WEBP":
+            return "image/webp"
+        if len(content) >= 12 and content[4:12] in {b"ftypavif", b"ftypavis"}:
+            return "image/avif"
+        if declared.startswith("image/"):
+            return declared
+        if declared in {"application/octet-stream", "binary/octet-stream", ""}:
+            suffix = path.rsplit(".", 1)[-1].lower()
+            return {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}.get(suffix)
+        return None
 
     async def _json(self, url: str) -> dict:
         cached = self._cache.get(url)

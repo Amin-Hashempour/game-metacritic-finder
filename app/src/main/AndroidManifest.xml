@@ -2,7 +2,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <application
         android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
         android:label="Metacritic Finder"
+        android:roundIcon="@mipmap/ic_launcher"
         android:theme="@style/Theme.MetacriticFinder"
         android:usesCleartextTraffic="true">
         <activity

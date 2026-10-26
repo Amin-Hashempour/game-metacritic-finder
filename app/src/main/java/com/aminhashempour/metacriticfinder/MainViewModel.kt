@@ -6,6 +6,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import retrofit2.HttpException
+import java.net.SocketTimeoutException
+import java.io.IOException
 
 sealed interface ScreenState {
     data object Search : ScreenState
@@ -34,7 +37,7 @@ class MainViewModel(private val api: GamesApi = ApiClient.games) : ViewModel() {
             _state.value = runCatching { api.search(value) }
                 .fold(
                     onSuccess = { if (it.isEmpty()) ScreenState.Error("No matching games found.") else ScreenState.Suggestions(it) },
-                    onFailure = { ScreenState.Error("The score service is unavailable. Try again shortly.") },
+                    onFailure = { ScreenState.Error(errorMessage(it)) },
                 )
         }
     }
@@ -44,7 +47,17 @@ class MainViewModel(private val api: GamesApi = ApiClient.games) : ViewModel() {
         _state.value = runCatching { api.details(game.id) }
             .fold(
                 onSuccess = { ScreenState.Details(it) },
-                onFailure = { ScreenState.Error("Could not load this game's scores.") },
+                onFailure = { ScreenState.Error(errorMessage(it)) },
             )
+    }
+
+    private fun errorMessage(error: Throwable): String = when (error) {
+        is SocketTimeoutException -> "The server is waking up. Please try once more in a few seconds."
+        is HttpException -> when (error.code()) {
+            503 -> "Metacritic is temporarily unavailable. Please try again shortly."
+            else -> "The score service returned error ${error.code()}."
+        }
+        is IOException -> "Could not reach the score service. Check your connection and try again."
+        else -> "Unexpected error: ${error.javaClass.simpleName}."
     }
 }

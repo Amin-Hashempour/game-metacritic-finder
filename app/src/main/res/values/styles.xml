@@ -1,7 +1,8 @@
 <resources>
-    <style name="Theme.MetacriticFinder" parent="android:style/Theme.Material.Light.NoActionBar">
+    <style name="Theme.MetacriticFinder" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:windowLightStatusBar">true</item>
-        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:navigationBarColor">#242526</item>
+        <item name="android:statusBarColor">#303133</item>
     </style>
 </resources>

@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: game-metacritic-finder-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /health
+    autoDeploy: true
+    plan: free

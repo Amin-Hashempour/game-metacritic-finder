@@ -25,9 +25,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.rememberAsyncImagePainter
 
-private val Ink = Color(0xFF13191F)
-private val Green = Color(0xFF2DAA6B)
-private val Canvas = Color(0xFFF4F6F4)
+private val WarmAmber = Color(0xFFE1A84B)
+private val WarmAmberDark = Color(0xFF5A421C)
+private val Canvas = Color(0xFF242526)
+private val Surface = Color(0xFF303133)
+private val SurfaceRaised = Color(0xFF393A3C)
+private val TextPrimary = Color(0xFFF1EEE8)
+private val TextSecondary = Color(0xFFBEBAB2)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -38,7 +42,24 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun MetacriticTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = lightColorScheme(primary = Green, background = Canvas, surface = Color.White), content = content)
+    MaterialTheme(
+        colorScheme = darkColorScheme(
+            primary = WarmAmber,
+            onPrimary = Color(0xFF302309),
+            primaryContainer = WarmAmberDark,
+            onPrimaryContainer = Color(0xFFFFDEA1),
+            background = Canvas,
+            onBackground = TextPrimary,
+            surface = Surface,
+            onSurface = TextPrimary,
+            surfaceVariant = SurfaceRaised,
+            onSurfaceVariant = TextSecondary,
+            outline = Color(0xFF77736C),
+            errorContainer = Color(0xFF52362E),
+            onErrorContainer = Color(0xFFFFDAD0),
+        ),
+        content = content,
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -47,7 +68,12 @@ fun FinderScreen(vm: MainViewModel = viewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
     val query by vm.query.collectAsStateWithLifecycle()
     Scaffold(
-        topBar = { CenterAlignedTopAppBar(title = { Text("METACRITIC FINDER", fontWeight = FontWeight.Black, letterSpacing = 1.sp) }) },
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text("METACRITIC FINDER", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Surface),
+            )
+        },
         containerColor = Canvas,
     ) { padding ->
         LazyColumn(
@@ -76,13 +102,13 @@ fun FinderScreen(vm: MainViewModel = viewModel()) {
 
 @Composable
 private fun Welcome() = Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-    Text("Find the score.", fontSize = 36.sp, fontWeight = FontWeight.Black, color = Ink)
-    Text("Type a full or partial game title. Misspellings are okay.", color = Color.DarkGray)
+    Text("Find the score.", fontSize = 36.sp, fontWeight = FontWeight.Black, color = TextPrimary)
+    Text("Type a full or partial game title. Misspellings are okay.", color = TextSecondary)
 }
 
 @Composable
 private fun SearchForm(query: String, update: (String) -> Unit, search: () -> Unit, loading: Boolean) {
-    Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+    Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = SurfaceRaised)) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Name the game", fontWeight = FontWeight.Bold)
             OutlinedTextField(
@@ -105,17 +131,17 @@ private fun SuggestionCard(game: SearchResult, select: () -> Unit) {
             if (game.image_url != null) Image(rememberAsyncImagePainter(game.image_url), null, Modifier.size(72.dp), contentScale = ContentScale.Crop)
             Column(Modifier.padding(horizontal = 14.dp).weight(1f)) {
                 Text(game.title, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                game.year?.let { Text(it.toString(), color = Color.Gray) }
+                game.year?.let { Text(it.toString(), color = TextSecondary) }
             }
-            Text("${(game.confidence * 100).toInt()}%", color = Green, fontWeight = FontWeight.Bold)
+            Text("${(game.confidence * 100).toInt()}%", color = WarmAmber, fontWeight = FontWeight.Bold)
         }
     }
 }
 
 @Composable
 private fun GameHeader(game: GameDetails) = Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-    Text(game.title, fontSize = 32.sp, fontWeight = FontWeight.Black, color = Ink)
-    Text(listOfNotNull(game.year?.toString(), "Critic metascores").joinToString(" · "), color = Color.Gray)
+    Text(game.title, fontSize = 32.sp, fontWeight = FontWeight.Black, color = TextPrimary)
+    Text(listOfNotNull(game.year?.toString(), "Critic metascores").joinToString(" · "), color = TextSecondary)
 }
 
 @Composable
@@ -125,7 +151,7 @@ private fun PlatformCard(score: PlatformScore) {
         Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(score.platform, fontSize = 19.sp, fontWeight = FontWeight.Bold)
-                Text(score.review_count?.let { "Based on $it critic reviews" } ?: "Metacritic critic score", color = Color.Gray, fontSize = 13.sp)
+                Text(score.review_count?.let { "Based on $it critic reviews" } ?: "Metacritic critic score", color = TextSecondary, fontSize = 13.sp)
             }
             Box(Modifier.size(58.dp).background(scoreColor, RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
                 Text(score.metascore?.toString() ?: "TBD", color = Color.White, fontWeight = FontWeight.Black, fontSize = if (score.metascore == null) 16.sp else 24.sp)
@@ -135,6 +161,6 @@ private fun PlatformCard(score: PlatformScore) {
 }
 
 @Composable
-private fun MessageCard(message: String) = Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF2E0))) {
-    Text(message, Modifier.padding(18.dp), color = Color(0xFF684719))
+private fun MessageCard(message: String) = Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF4A3A24))) {
+    Text(message, Modifier.padding(18.dp), color = Color(0xFFFFDCA0))
 }

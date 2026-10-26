@@ -32,11 +32,19 @@ async def test_search_ranks_typo(monkeypatch):
 @pytest.mark.asyncio
 async def test_all_platform_scores(monkeypatch):
     provider = MetacriticProvider(min_request_interval=0)
-    monkeypatch.setattr(provider, "_json", lambda _: async_value(read_json("details.json")))
+    async def platform_response(url):
+        if "platform=playstation-5" in url:
+            return read_json("details-ps5.json")
+        if "platform=pc" in url:
+            return read_json("details-pc.json")
+        return read_json("details-base.json")
+
+    monkeypatch.setattr(provider, "_json", platform_response)
     details = await provider.details("elden-ring")
     await provider.close()
-    assert [(x.platform, x.metascore) for x in details.platforms] == [("PlayStation 5", 96), ("PC", 96)]
+    assert [(x.platform, x.metascore) for x in details.platforms] == [("PlayStation 5", 96), ("PC", 94)]
     assert details.platforms[0].review_count == 84
+    assert details.platforms[1].review_count == 60
 
 
 async def async_value(value):

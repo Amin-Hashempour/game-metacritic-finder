@@ -13,6 +13,7 @@ from .models import GameDetails, PlatformScore, SearchResult
 
 
 API_BASE = "https://backend.metacritic.com"
+COMPOSER_BASE = f"{API_BASE}/composer/metacritic/pages"
 SITE_BASE = "https://www.metacritic.com"
 
 
@@ -95,19 +96,14 @@ class MetacriticProvider:
 
     async def details(self, game_id: str) -> GameDetails:
         slug = self._validate_slug(game_id)
-        url = f"{API_BASE}/games/metacritic/{slug}/web?componentName=product&componentType=Product"
-        payload = await self._json(url)
-        data = payload.get("data")
-        item = data.get("item") if isinstance(data, dict) else None
+        base_url = f"{COMPOSER_BASE}/games/{slug}/web"
+        payload = await self._json(base_url)
+        item = self._component_item(payload, "product")
         if not isinstance(item, dict):
             raise SourceUnavailable("Metacritic returned no game details")
         title = self._text(item.get("title"))
         if not title:
             raise SourceUnavailable("Metacritic returned an incomplete game record")
-        critic = item.get("criticScoreSummary")
-        critic = critic if isinstance(critic, dict) else {}
-        score = self._integer(critic.get("score"))
-        review_count = self._integer(critic.get("reviewCount"))
         platforms = item.get("platforms")
         platform_names: list[str] = []
         if isinstance(platforms, list):
@@ -117,22 +113,50 @@ class MetacriticProvider:
         if not platform_names:
             platform_names = ["All platforms"]
         source_url = f"{SITE_BASE}/game/{slug}/"
+        scores = await asyncio.gather(
+            *(self._platform_score(base_url, platform, source_url) for platform in platform_names)
+        )
         return GameDetails(
             id=slug,
             title=title,
             year=self._integer(item.get("premiereYear")),
             image_url=self._image_url(item),
-            platforms=[
-                PlatformScore(
-                    platform=platform,
-                    metascore=score,
-                    review_count=review_count,
-                    release_date=self._text(item.get("releaseDate")),
-                    metacritic_url=source_url,
-                )
-                for platform in platform_names
-            ],
+            platforms=scores,
         )
+
+    async def _platform_score(
+        self, base_url: str, platform: str, source_url: str
+    ) -> PlatformScore:
+        platform_slug = re.sub(r"[^a-z0-9]+", "-", platform.casefold()).strip("-")
+        payload = await self._json(f"{base_url}?platform={quote(platform_slug)}")
+        item = self._component_item(payload, "critic-score-summary") or {}
+        product = self._component_item(payload, "product") or {}
+        return PlatformScore(
+            platform=platform,
+            metascore=self._integer(item.get("score")),
+            review_count=self._integer(item.get("reviewCount")),
+            release_date=self._text(product.get("releaseDate")),
+            metacritic_url=f"{source_url}?platform={platform_slug}",
+        )
+
+    @staticmethod
+    def _component_item(payload: dict, name: str) -> dict | None:
+        components = payload.get("components")
+        if not isinstance(components, list):
+            return None
+        for component in components:
+            if not isinstance(component, dict):
+                continue
+            meta = component.get("meta")
+            data = component.get("data")
+            if (
+                isinstance(meta, dict)
+                and meta.get("componentName") == name
+                and isinstance(data, dict)
+                and isinstance(data.get("item"), dict)
+            ):
+                return data["item"]
+        return None
 
     @staticmethod
     def _items(payload: dict) -> list[dict]:

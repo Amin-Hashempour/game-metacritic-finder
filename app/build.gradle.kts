@@ -12,8 +12,8 @@ android {
         applicationId = "com.aminhashempour.metacriticfinder"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.4.0"
         val apiBaseUrl = providers.gradleProperty("apiBaseUrl")
             .orElse("http://10.0.2.2:8000/")
             .get()

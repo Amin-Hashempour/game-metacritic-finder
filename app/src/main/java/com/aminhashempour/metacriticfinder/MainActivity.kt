@@ -2,6 +2,7 @@ package com.aminhashempour.metacriticfinder
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -11,6 +12,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -67,10 +69,19 @@ fun MetacriticTheme(content: @Composable () -> Unit) {
 fun FinderScreen(vm: MainViewModel = viewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
     val query by vm.query.collectAsStateWithLifecycle()
+    val canGoBack = state is ScreenState.Suggestions || state is ScreenState.Details || state is ScreenState.Error
+    BackHandler(enabled = canGoBack, onBack = vm::goHome)
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text("METACRITIC FINDER", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
+                navigationIcon = {
+                    if (canGoBack) {
+                        IconButton(onClick = vm::goHome) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back to home")
+                        }
+                    }
+                },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Surface),
             )
         },

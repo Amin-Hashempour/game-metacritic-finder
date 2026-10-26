@@ -26,6 +26,11 @@ class MainViewModel(private val api: GamesApi = ApiClient.games) : ViewModel() {
 
     fun updateQuery(value: String) { query.value = value }
 
+    fun goHome() {
+        query.value = ""
+        _state.value = ScreenState.Search
+    }
+
     fun search() {
         val value = query.value.trim()
         if (value.length < 2) {

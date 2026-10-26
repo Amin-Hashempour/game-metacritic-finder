@@ -41,3 +41,11 @@ async def game_details(request: Request, game_id: str):
         return await request.app.state.provider.details(game_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/v1/diagnostics/platforms/{game_id}")
+async def platform_diagnostics(request: Request, game_id: str):
+    try:
+        return await request.app.state.provider.platform_diagnostics(game_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -139,6 +139,57 @@ class MetacriticProvider:
             metacritic_url=f"{source_url}?platform={platform_slug}",
         )
 
+    async def platform_diagnostics(self, game_id: str) -> dict:
+        """Compare upstream platform selectors; temporary support diagnostic."""
+        slug = self._validate_slug(game_id)
+        base_url = f"{COMPOSER_BASE}/games/{slug}/web"
+        base = await self._json(base_url)
+        product = self._component_item(base, "product") or {}
+        platforms = product.get("platforms")
+        if not isinstance(platforms, list):
+            platforms = []
+        results = []
+        for platform in platforms:
+            if not isinstance(platform, dict):
+                continue
+            name = self._text(platform.get("name"))
+            platform_id = self._integer(platform.get("id"))
+            if not name:
+                continue
+            platform_slug = re.sub(r"[^a-z0-9]+", "-", name.casefold()).strip("-")
+            candidates = {
+                "composer_slug": f"{base_url}?platform={quote(platform_slug)}",
+                "stats_slug": (
+                    f"{API_BASE}/reviews/metacritic/critic/games/{slug}/stats/web"
+                    f"?componentName=critic-score-summary&componentType=MetaScoreSummary"
+                    f"&platform={quote(platform_slug)}"
+                ),
+                "stats_id": (
+                    f"{API_BASE}/reviews/metacritic/critic/games/{slug}/stats/web"
+                    f"?componentName=critic-score-summary&componentType=MetaScoreSummary"
+                    f"&platformId={platform_id}"
+                ),
+            }
+            readings = {}
+            for label, url in candidates.items():
+                try:
+                    payload = await self._json(url)
+                    if label.startswith("composer"):
+                        score_item = self._component_item(payload, "critic-score-summary") or {}
+                    else:
+                        data = payload.get("data")
+                        score_item = data.get("item") if isinstance(data, dict) else {}
+                    readings[label] = {
+                        "score": self._integer(score_item.get("score")),
+                        "review_count": self._integer(score_item.get("reviewCount")),
+                    }
+                except SourceUnavailable as exc:
+                    readings[label] = {"error": str(exc)}
+            results.append(
+                {"platform": name, "platform_id": platform_id, "readings": readings}
+            )
+        return {"game": slug, "platforms": results}
+
     @staticmethod
     def _component_item(payload: dict, name: str) -> dict | None:
         components = payload.get("components")

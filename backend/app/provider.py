@@ -4,17 +4,16 @@ import asyncio
 import re
 import time
 from dataclasses import dataclass
-from urllib.parse import quote, urljoin, urlparse
+from urllib.parse import quote
 
 import httpx
-from bs4 import BeautifulSoup
 from rapidfuzz.fuzz import WRatio
 
 from .models import GameDetails, PlatformScore, SearchResult
 
 
-BASE_URL = "https://www.metacritic.com"
-YEAR_RE = re.compile(r"\b(19|20)\d{2}\b")
+API_BASE = "https://backend.metacritic.com"
+SITE_BASE = "https://www.metacritic.com"
 
 
 class SourceUnavailable(RuntimeError):
@@ -24,11 +23,11 @@ class SourceUnavailable(RuntimeError):
 @dataclass
 class CacheItem:
     expires_at: float
-    value: object
+    value: dict
 
 
 class MetacriticProvider:
-    """Metacritic HTML adapter. Keep markup assumptions isolated in this class."""
+    """Adapter for the JSON backend used by Metacritic's own website."""
 
     def __init__(self, ttl_seconds: int = 900, min_request_interval: float = 1.0):
         self.ttl_seconds = ttl_seconds
@@ -37,22 +36,23 @@ class MetacriticProvider:
         self._request_lock = asyncio.Lock()
         self._last_request = 0.0
         self._client = httpx.AsyncClient(
-            timeout=12,
+            timeout=15,
             follow_redirects=True,
             headers={
-                "User-Agent": "Mozilla/5.0 (Android; MetacriticFinder/0.1)",
-                "Accept-Language": "en-US,en;q=0.9",
+                "User-Agent": "Mozilla/5.0 (Android; MetacriticFinder/0.2)",
+                "Accept": "application/json,*/*;q=0.8",
+                "Referer": f"{SITE_BASE}/",
             },
         )
 
     async def close(self) -> None:
         await self._client.aclose()
 
-    async def _html(self, url: str) -> str:
+    async def _json(self, url: str) -> dict:
         cached = self._cache.get(url)
         now = time.monotonic()
         if cached and cached.expires_at > now:
-            return str(cached.value)
+            return cached.value
         async with self._request_lock:
             delay = self.min_request_interval - (time.monotonic() - self._last_request)
             if delay > 0:
@@ -61,126 +61,120 @@ class MetacriticProvider:
                 response = await self._client.get(url)
                 self._last_request = time.monotonic()
                 response.raise_for_status()
-            except httpx.HTTPError as exc:
-                raise SourceUnavailable("Metacritic is temporarily unavailable") from exc
-        self._cache[url] = CacheItem(now + self.ttl_seconds, response.text)
-        return response.text
+                payload = response.json()
+            except (httpx.HTTPError, ValueError) as exc:
+                raise SourceUnavailable("Metacritic data is temporarily unavailable") from exc
+        if not isinstance(payload, dict):
+            raise SourceUnavailable("Metacritic returned an unexpected response")
+        self._cache[url] = CacheItem(now + self.ttl_seconds, payload)
+        return payload
 
     async def search(self, query: str, limit: int = 8) -> list[SearchResult]:
         normalized = " ".join(query.split()).strip()
-        url = f"{BASE_URL}/search/{quote(normalized)}/?category=13"
-        soup = BeautifulSoup(await self._html(url), "html.parser")
-        candidates: dict[str, SearchResult] = {}
-        selectors = "a.c-pageSiteSearch-results-item, a[href*='/game/']"
-        for anchor in soup.select(selectors):
-            href = anchor.get("href", "")
-            if "/game/" not in href:
+        url = f"{API_BASE}/finder/metacritic/search/{quote(normalized)}/web?limit=30&offset=0"
+        candidates: list[SearchResult] = []
+        for item in self._items(await self._json(url)):
+            if item.get("type") != "game-title":
                 continue
-            title_node = anchor.select_one(".c-pageSiteSearch-results-item-title, h3, .c-finderProductCard_title")
-            title = (title_node or anchor).get_text(" ", strip=True)
-            title = re.sub(r"\s+", " ", title)
-            if not title or len(title) > 120:
+            slug = self._text(item.get("slug"))
+            title = self._text(item.get("title"))
+            if not slug or not title:
                 continue
-            absolute = urljoin(BASE_URL, href)
-            game_id = self._id_from_url(absolute)
-            year_match = YEAR_RE.search(anchor.get_text(" ", strip=True))
-            image = anchor.select_one("img")
-            score = WRatio(normalized.casefold(), title.casefold()) / 100
-            current = candidates.get(game_id)
-            result = SearchResult(
-                id=game_id,
-                title=title,
-                year=int(year_match.group()) if year_match else None,
-                image_url=(image.get("src") or image.get("data-src")) if image else None,
-                metacritic_url=absolute,
-                confidence=score,
-            )
-            if current is None or result.confidence > current.confidence:
-                candidates[game_id] = result
-        return sorted(candidates.values(), key=lambda item: item.confidence, reverse=True)[:limit]
-
-    async def details(self, game_id: str) -> GameDetails:
-        safe_id = self._validate_id(game_id)
-        canonical_url = f"{BASE_URL}/game/{safe_id}/"
-        soup = BeautifulSoup(await self._html(canonical_url), "html.parser")
-        title_node = soup.select_one("h1, .c-productHero_title")
-        if not title_node:
-            raise SourceUnavailable("Metacritic page format is not recognized")
-        title = title_node.get_text(" ", strip=True)
-        image = soup.select_one(".c-productHero_image img, meta[property='og:image']")
-        image_url = None
-        if image:
-            image_url = image.get("src") or image.get("content")
-        page_text = soup.get_text(" ", strip=True)
-        year_match = YEAR_RE.search(page_text)
-        scores: list[PlatformScore] = []
-        seen: set[str] = set()
-        for block in soup.select("[data-platform], .c-gamePlatformScore, .c-productScoreInfo"):
-            platform_node = block.select_one("[data-platform], .c-gamePlatformScore_platform, .c-productScoreInfo_platform")
-            score_node = (
-                block.select_one(".c-siteReviewScore")
-                or block.select_one(".c-gamePlatformScore_score")
-                or block.select_one("[data-testid*='score']")
-            )
-            if not platform_node or not score_node:
-                continue
-            platform = platform_node.get("data-platform") or platform_node.get_text(" ", strip=True)
-            score_match = re.search(r"\b(?:100|[1-9]?\d)\b", score_node.get_text(" ", strip=True))
-            if not platform or platform in seen:
-                continue
-            seen.add(platform)
-            scores.append(
-                PlatformScore(
-                    platform=platform,
-                    metascore=int(score_match.group()) if score_match else None,
-                    metacritic_url=canonical_url,
+            candidates.append(
+                SearchResult(
+                    id=slug,
+                    title=title,
+                    year=self._integer(item.get("premiereYear")),
+                    image_url=self._image_url(item),
+                    metacritic_url=f"{SITE_BASE}/game/{slug}/",
+                    confidence=WRatio(normalized.casefold(), title.casefold()) / 100,
                 )
             )
-        if not scores:
-            scores = self._json_ld_scores(soup, canonical_url)
+        candidates.sort(key=lambda item: item.confidence, reverse=True)
+        return candidates[:limit]
+
+    async def details(self, game_id: str) -> GameDetails:
+        slug = self._validate_slug(game_id)
+        url = f"{API_BASE}/games/metacritic/{slug}/web?componentName=product&componentType=Product"
+        payload = await self._json(url)
+        data = payload.get("data")
+        item = data.get("item") if isinstance(data, dict) else None
+        if not isinstance(item, dict):
+            raise SourceUnavailable("Metacritic returned no game details")
+        title = self._text(item.get("title"))
+        if not title:
+            raise SourceUnavailable("Metacritic returned an incomplete game record")
+        critic = item.get("criticScoreSummary")
+        critic = critic if isinstance(critic, dict) else {}
+        score = self._integer(critic.get("score"))
+        review_count = self._integer(critic.get("reviewCount"))
+        platforms = item.get("platforms")
+        platform_names: list[str] = []
+        if isinstance(platforms, list):
+            for platform in platforms:
+                if isinstance(platform, dict) and (name := self._text(platform.get("name"))):
+                    platform_names.append(name)
+        if not platform_names:
+            platform_names = ["All platforms"]
+        source_url = f"{SITE_BASE}/game/{slug}/"
         return GameDetails(
-            id=safe_id,
+            id=slug,
             title=title,
-            year=int(year_match.group()) if year_match else None,
-            image_url=image_url,
-            platforms=scores,
+            year=self._integer(item.get("premiereYear")),
+            image_url=self._image_url(item),
+            platforms=[
+                PlatformScore(
+                    platform=platform,
+                    metascore=score,
+                    review_count=review_count,
+                    release_date=self._text(item.get("releaseDate")),
+                    metacritic_url=source_url,
+                )
+                for platform in platform_names
+            ],
         )
 
     @staticmethod
-    def _json_ld_scores(soup: BeautifulSoup, url: str) -> list[PlatformScore]:
-        import json
-
-        output: list[PlatformScore] = []
-        for node in soup.select("script[type='application/ld+json']"):
-            try:
-                payload = json.loads(node.string or "{}")
-            except json.JSONDecodeError:
-                continue
-            entries = payload if isinstance(payload, list) else [payload]
-            for entry in entries:
-                if not isinstance(entry, dict) or "aggregateRating" not in entry:
-                    continue
-                rating = entry["aggregateRating"]
-                raw_score = rating.get("ratingValue") if isinstance(rating, dict) else None
-                try:
-                    score = round(float(raw_score))
-                except (TypeError, ValueError):
-                    continue
-                output.append(PlatformScore(platform="All platforms", metascore=score, metacritic_url=url))
-        return output
+    def _items(payload: dict) -> list[dict]:
+        data = payload.get("data")
+        items = data.get("items") if isinstance(data, dict) else None
+        if not isinstance(items, list):
+            raise SourceUnavailable("Metacritic returned no search results")
+        return [item for item in items if isinstance(item, dict)]
 
     @staticmethod
-    def _id_from_url(url: str) -> str:
-        path = urlparse(url).path.strip("/").split("/")
+    def _image_url(item: dict) -> str | None:
+        images = item.get("images")
+        if not isinstance(images, list):
+            return None
+        ordered = sorted(
+            (image for image in images if isinstance(image, dict)),
+            key=lambda image: image.get("bucketType") != "poster",
+        )
+        for image in ordered:
+            path = image.get("bucketPath")
+            if isinstance(path, str) and path.startswith("/"):
+                return f"{SITE_BASE}{path}"
+        return None
+
+    @staticmethod
+    def _text(value: object) -> str | None:
+        if not isinstance(value, str):
+            return None
+        value = value.strip()
+        return value or None
+
+    @staticmethod
+    def _integer(value: object) -> int | None:
         try:
-            index = path.index("game")
-            return "/".join(path[index + 1 :])
-        except ValueError:
-            return path[-1]
+            parsed = int(value)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed != 0 else None
 
     @staticmethod
-    def _validate_id(game_id: str) -> str:
+    def _validate_slug(game_id: str) -> str:
         value = game_id.strip("/")
-        if not value or not re.fullmatch(r"[a-zA-Z0-9/_-]+", value) or ".." in value:
+        if not value or not re.fullmatch(r"[a-zA-Z0-9-]+", value):
             raise ValueError("Invalid game id")
         return value

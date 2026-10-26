@@ -21,7 +21,7 @@ async def test_health():
 @pytest.mark.asyncio
 async def test_search_ranks_typo(monkeypatch):
     provider = MetacriticProvider(min_request_interval=0)
-    monkeypatch.setattr(provider, "_html", lambda _: async_value(FIXTURES.joinpath("search.html").read_text()))
+    monkeypatch.setattr(provider, "_json", lambda _: async_value(read_json("search.json")))
     results = await provider.search("eldn rng")
     await provider.close()
     assert results[0].title == "Elden Ring"
@@ -32,11 +32,18 @@ async def test_search_ranks_typo(monkeypatch):
 @pytest.mark.asyncio
 async def test_all_platform_scores(monkeypatch):
     provider = MetacriticProvider(min_request_interval=0)
-    monkeypatch.setattr(provider, "_html", lambda _: async_value(FIXTURES.joinpath("details.html").read_text()))
+    monkeypatch.setattr(provider, "_json", lambda _: async_value(read_json("details.json")))
     details = await provider.details("elden-ring")
     await provider.close()
-    assert [(x.platform, x.metascore) for x in details.platforms] == [("PlayStation 5", 96), ("PC", 94)]
+    assert [(x.platform, x.metascore) for x in details.platforms] == [("PlayStation 5", 96), ("PC", 96)]
+    assert details.platforms[0].review_count == 84
 
 
 async def async_value(value):
     return value
+
+
+def read_json(name):
+    import json
+
+    return json.loads(FIXTURES.joinpath(name).read_text())

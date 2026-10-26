@@ -27,6 +27,8 @@ async def test_search_ranks_typo(monkeypatch):
     assert results[0].title == "Elden Ring"
     assert results[0].year == 2022
     assert results[0].confidence > 0.7
+    assert results[0].image_url.startswith("https://images.weserv.nl/")
+    assert "www.metacritic.com" in results[0].image_url
 
 
 @pytest.mark.asyncio

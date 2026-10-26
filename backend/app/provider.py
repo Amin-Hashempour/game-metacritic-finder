@@ -4,7 +4,7 @@ import asyncio
 import re
 import time
 from dataclasses import dataclass
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, quote, urlencode, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -224,7 +224,16 @@ class MetacriticProvider:
         for image in ordered:
             path = image.get("bucketPath")
             if isinstance(path, str) and path.startswith("/"):
-                return f"{SITE_BASE}{path}"
+                params = urlencode(
+                    {
+                        "url": f"www.metacritic.com{path}",
+                        "w": 180,
+                        "h": 260,
+                        "fit": "cover",
+                        "output": "jpg",
+                    }
+                )
+                return f"https://images.weserv.nl/?{params}"
         return None
 
     @staticmethod

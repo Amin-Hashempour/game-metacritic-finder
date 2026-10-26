@@ -20,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -137,9 +138,27 @@ private fun SearchForm(query: String, update: (String) -> Unit, search: () -> Un
 
 @Composable
 private fun SuggestionCard(game: SearchResult, select: () -> Unit) {
+    val coverUrl = game.image_url?.let {
+        if (it.startsWith("/")) BuildConfig.API_BASE_URL.trimEnd('/') + it else it
+    }
     Card(Modifier.fillMaxWidth().clickable(onClick = select), shape = RoundedCornerShape(18.dp)) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (game.image_url != null) Image(rememberAsyncImagePainter(game.image_url), null, Modifier.size(72.dp), contentScale = ContentScale.Crop)
+            Box(
+                Modifier
+                    .size(width = 58.dp, height = 82.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFF47484A)),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (coverUrl != null) {
+                    Image(
+                        painter = rememberAsyncImagePainter(coverUrl),
+                        contentDescription = "${game.title} cover",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                    )
+                }
+            }
             Column(Modifier.padding(horizontal = 14.dp).weight(1f)) {
                 Text(game.title, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                 game.year?.let { Text(it.toString(), color = TextSecondary) }

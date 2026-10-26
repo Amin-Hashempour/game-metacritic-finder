@@ -36,6 +36,7 @@ class MetacriticProvider:
         self.ttl_seconds = ttl_seconds
         self.min_request_interval = min_request_interval
         self._cache: dict[str, CacheItem] = {}
+        self._image_cache: dict[str, tuple[float, bytes, str]] = {}
         self._request_lock = asyncio.Lock()
         self._last_request = 0.0
         self._client = httpx.AsyncClient(
@@ -50,6 +51,31 @@ class MetacriticProvider:
 
     async def close(self) -> None:
         await self._client.aclose()
+
+    async def image(self, path: str) -> tuple[bytes, str]:
+        if (
+            ".." in path
+            or not path.startswith(("/provider/", "/a/img/"))
+            or not re.fullmatch(r"/[A-Za-z0-9_./-]+\.(?:jpe?g|png|webp)", path, re.IGNORECASE)
+        ):
+            raise ValueError("Invalid image path")
+        cached = self._image_cache.get(path)
+        now = time.monotonic()
+        if cached and cached[0] > now:
+            return cached[1], cached[2]
+        session = AsyncSession(impersonate="chrome")
+        try:
+            response = await session.get(f"{SITE_BASE}{path}", timeout=25)
+            if response.status_code >= 400:
+                raise SourceUnavailable("Game artwork is temporarily unavailable")
+            content_type = response.headers.get("content-type", "image/jpeg").split(";")[0]
+            if content_type not in {"image/jpeg", "image/png", "image/webp"}:
+                raise SourceUnavailable("Metacritic returned an invalid image")
+            content = bytes(response.content)
+            self._image_cache[path] = (now + 86400, content, content_type)
+            return content, content_type
+        finally:
+            await session.close()
 
     async def _json(self, url: str) -> dict:
         cached = self._cache.get(url)

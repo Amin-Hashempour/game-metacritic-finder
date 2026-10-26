@@ -5,7 +5,7 @@ class SearchResult(BaseModel):
     id: str
     title: str
     year: int | None = None
-    image_url: HttpUrl | None = None
+    image_url: str | None = None
     metacritic_url: HttpUrl
     confidence: float = Field(ge=0, le=1)
 
@@ -22,7 +22,7 @@ class GameDetails(BaseModel):
     id: str
     title: str
     year: int | None = None
-    image_url: HttpUrl | None = None
+    image_url: str | None = None
     platforms: list[PlatformScore]
 
 

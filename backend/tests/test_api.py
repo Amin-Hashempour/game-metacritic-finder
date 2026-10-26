@@ -68,6 +68,14 @@ def test_platform_card_parser_keeps_scores_separate():
     ]
 
 
+@pytest.mark.asyncio
+async def test_image_proxy_rejects_external_urls():
+    provider = MetacriticProvider(min_request_interval=0)
+    with pytest.raises(ValueError, match="Invalid image path"):
+        await provider.image("https://example.com/image.jpg")
+    await provider.close()
+
+
 async def async_value(value):
     return value
 

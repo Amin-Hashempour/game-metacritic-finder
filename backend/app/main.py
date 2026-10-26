@@ -1,7 +1,8 @@
 from contextlib import asynccontextmanager
+from urllib.parse import urlencode, urlparse
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from .models import ErrorBody, GameDetails, SearchResult
 from .provider import MetacriticProvider, SourceUnavailable
@@ -32,7 +33,26 @@ async def health():
 
 @app.get("/v1/games/search", response_model=list[SearchResult])
 async def search_games(request: Request, q: str = Query(min_length=2, max_length=80)):
-    return await request.app.state.provider.search(q)
+    results = await request.app.state.provider.search(q)
+    for result in results:
+        if result.image_url:
+            parsed = urlparse(str(result.image_url))
+            if parsed.hostname in {"metacritic.com", "www.metacritic.com"}:
+                result.image_url = f"/v1/images?{urlencode({'path': parsed.path})}"
+    return results
+
+
+@app.get("/v1/images", name="game_image")
+async def game_image(request: Request, path: str = Query(min_length=5, max_length=500)):
+    try:
+        content, media_type = await request.app.state.provider.image(path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @app.get("/v1/games/{game_id:path}", response_model=GameDetails)

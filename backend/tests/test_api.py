@@ -40,11 +40,32 @@ async def test_all_platform_scores(monkeypatch):
         return read_json("details-base.json")
 
     monkeypatch.setattr(provider, "_json", platform_response)
+    monkeypatch.setattr(
+        provider,
+        "_platform_scores_html",
+        lambda *_: async_value(
+            provider._parse_platform_scores(
+                FIXTURES.joinpath("platform-cards.html").read_text(),
+                "https://www.metacritic.com/game/elden-ring/",
+            )
+        ),
+    )
     details = await provider.details("elden-ring")
     await provider.close()
     assert [(x.platform, x.metascore) for x in details.platforms] == [("PlayStation 5", 96), ("PC", 94)]
-    assert details.platforms[0].review_count == 84
+    assert details.platforms[0].review_count == 93
     assert details.platforms[1].review_count == 60
+
+
+def test_platform_card_parser_keeps_scores_separate():
+    scores = MetacriticProvider._parse_platform_scores(
+        FIXTURES.joinpath("platform-cards.html").read_text(),
+        "https://www.metacritic.com/game/elden-ring/",
+    )
+    assert [(item.platform, item.metascore, item.review_count) for item in scores] == [
+        ("PlayStation 5", 96, 93),
+        ("PC", 94, 60),
+    ]
 
 
 async def async_value(value):

@@ -4,9 +4,11 @@ import asyncio
 import re
 import time
 from dataclasses import dataclass
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, urlparse
 
 import httpx
+from bs4 import BeautifulSoup
+from curl_cffi.requests import AsyncSession
 from rapidfuzz.fuzz import WRatio
 
 from .models import GameDetails, PlatformScore, SearchResult
@@ -113,9 +115,18 @@ class MetacriticProvider:
         if not platform_names:
             platform_names = ["All platforms"]
         source_url = f"{SITE_BASE}/game/{slug}/"
-        scores = await asyncio.gather(
-            *(self._platform_score(base_url, platform, source_url) for platform in platform_names)
-        )
+        scores = await self._platform_scores_html(slug, source_url)
+        if not scores:
+            critic = self._component_item(payload, "critic-score-summary") or {}
+            scores = [
+                PlatformScore(
+                    platform="Default Metacritic edition",
+                    metascore=self._integer(critic.get("score")),
+                    review_count=self._integer(critic.get("reviewCount")),
+                    release_date=self._text(item.get("releaseDate")),
+                    metacritic_url=source_url,
+                )
+            ]
         return GameDetails(
             id=slug,
             title=title,
@@ -124,91 +135,54 @@ class MetacriticProvider:
             platforms=scores,
         )
 
-    async def _platform_score(
-        self, base_url: str, platform: str, source_url: str
-    ) -> PlatformScore:
-        platform_slug = re.sub(r"[^a-z0-9]+", "-", platform.casefold()).strip("-")
-        payload = await self._json(f"{base_url}?platform={quote(platform_slug)}")
-        item = self._component_item(payload, "critic-score-summary") or {}
-        product = self._component_item(payload, "product") or {}
-        return PlatformScore(
-            platform=platform,
-            metascore=self._integer(item.get("score")),
-            review_count=self._integer(item.get("reviewCount")),
-            release_date=self._text(product.get("releaseDate")),
-            metacritic_url=f"{source_url}?platform={platform_slug}",
-        )
+    async def _platform_scores_html(
+        self, slug: str, source_url: str
+    ) -> list[PlatformScore]:
+        session = AsyncSession(impersonate="chrome")
+        try:
+            response = await session.get(source_url, timeout=25)
+            if response.status_code >= 400:
+                return []
+            return self._parse_platform_scores(response.text, source_url)
+        except Exception:
+            return []
+        finally:
+            await session.close()
 
-    async def platform_diagnostics(self, game_id: str) -> dict:
-        """Compare upstream platform selectors; temporary support diagnostic."""
-        slug = self._validate_slug(game_id)
-        base_url = f"{COMPOSER_BASE}/games/{slug}/web"
-        base = await self._json(base_url)
-        product = self._component_item(base, "product") or {}
-        platforms = product.get("platforms")
-        if not isinstance(platforms, list):
-            platforms = []
-        results = []
-        selected = [
-            platform
-            for platform in platforms
-            if isinstance(platform, dict) and platform.get("name") == "PC"
-        ] or platforms[:1]
-        for platform in selected:
-            if not isinstance(platform, dict):
+    @staticmethod
+    def _parse_platform_scores(html: str, source_url: str) -> list[PlatformScore]:
+        soup = BeautifulSoup(html, "html.parser")
+        scores: list[PlatformScore] = []
+        seen: set[str] = set()
+        for card in soup.select('[data-testid="product-score-card"]'):
+            href = card.get("href") or card.get("to") or ""
+            platform = None
+            if href:
+                platform = parse_qs(urlparse(href).query).get("platform", [None])[0]
+            title = card.select_one(".game-platform-logo__icon title")
+            if title and title.get_text(strip=True):
+                platform = title.get_text(strip=True)
+            if not platform:
                 continue
-            name = self._text(platform.get("name"))
-            platform_id = self._integer(platform.get("id"))
-            if not name:
+            if not title:
+                platform = platform.replace("-", " ").title()
+            if platform in seen:
                 continue
-            platform_slug = re.sub(r"[^a-z0-9]+", "-", name.casefold()).strip("-")
-            candidates = {
-                "composer_slug": f"{base_url}?platform={quote(platform_slug)}",
-                "composer_id": f"{base_url}?platform={platform_id}",
-                "composer_platform_id": f"{base_url}?platformId={platform_id}",
-                "composer_platform_ids": f"{base_url}?platformIds={platform_id}",
-                "composer_platform_slug": f"{base_url}?platformSlug={quote(platform_slug)}",
-                "composer_exact_name": f"{base_url}?platform={quote(name)}",
-                "stats_platform_slug": (
-                    f"{API_BASE}/reviews/metacritic/critic/games/{slug}/stats/web"
-                    f"?componentName=critic-score-summary&componentType=MetaScoreSummary"
-                    f"&platform={quote(platform_slug)}"
-                ),
-                "stats_platform_id": (
-                    f"{API_BASE}/reviews/metacritic/critic/games/{slug}/stats/web"
-                    f"?componentName=critic-score-summary&componentType=MetaScoreSummary"
-                    f"&platformId={platform_id}"
-                ),
-                "stats_platform_ids": (
-                    f"{API_BASE}/reviews/metacritic/critic/games/{slug}/stats/web"
-                    f"?componentName=critic-score-summary&componentType=MetaScoreSummary"
-                    f"&platformIds={platform_id}"
-                ),
-                "stats_platform_slug_key": (
-                    f"{API_BASE}/reviews/metacritic/critic/games/{slug}/stats/web"
-                    f"?componentName=critic-score-summary&componentType=MetaScoreSummary"
-                    f"&platformSlug={quote(platform_slug)}"
-                ),
-            }
-            readings = {}
-            for label, url in candidates.items():
-                try:
-                    payload = await self._json(url)
-                    if label.startswith("composer"):
-                        score_item = self._component_item(payload, "critic-score-summary") or {}
-                    else:
-                        data = payload.get("data")
-                        score_item = data.get("item") if isinstance(data, dict) else {}
-                    readings[label] = {
-                        "score": self._integer(score_item.get("score")),
-                        "review_count": self._integer(score_item.get("reviewCount")),
-                    }
-                except SourceUnavailable as exc:
-                    readings[label] = {"error": str(exc)}
-            results.append(
-                {"platform": name, "platform_id": platform_id, "readings": readings}
+            score_node = card.select_one(".c-siteReviewScore span, .c-siteReviewScore")
+            score_match = re.search(r"\b(?:100|[1-9]?\d)\b", score_node.get_text(" ", strip=True)) if score_node else None
+            text = card.get_text(" ", strip=True)
+            count_match = re.search(r"([\d,]+)\s+(?:Critic\s+)?Reviews?", text, re.IGNORECASE)
+            platform_slug = parse_qs(urlparse(href).query).get("platform", [None])[0]
+            scores.append(
+                PlatformScore(
+                    platform=platform,
+                    metascore=int(score_match.group()) if score_match else None,
+                    review_count=int(count_match.group(1).replace(",", "")) if count_match else None,
+                    metacritic_url=f"{source_url}?platform={platform_slug}" if platform_slug else source_url,
+                )
             )
-        return {"game": slug, "platforms": results}
+            seen.add(platform)
+        return scores
 
     @staticmethod
     def _component_item(payload: dict, name: str) -> dict | None:

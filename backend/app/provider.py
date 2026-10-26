@@ -224,9 +224,10 @@ class MetacriticProvider:
         for image in ordered:
             path = image.get("bucketPath")
             if isinstance(path, str) and path.startswith("/"):
+                public_path = f"/a/img/catalog{path}" if path.startswith("/provider/") else path
                 params = urlencode(
                     {
-                        "url": f"www.metacritic.com{path}",
+                        "url": f"www.metacritic.com{public_path}",
                         "w": 180,
                         "h": 260,
                         "fit": "cover",

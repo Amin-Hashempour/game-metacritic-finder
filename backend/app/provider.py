@@ -149,7 +149,12 @@ class MetacriticProvider:
         if not isinstance(platforms, list):
             platforms = []
         results = []
-        for platform in platforms:
+        selected = [
+            platform
+            for platform in platforms
+            if isinstance(platform, dict) and platform.get("name") == "PC"
+        ] or platforms[:1]
+        for platform in selected:
             if not isinstance(platform, dict):
                 continue
             name = self._text(platform.get("name"))
@@ -159,15 +164,30 @@ class MetacriticProvider:
             platform_slug = re.sub(r"[^a-z0-9]+", "-", name.casefold()).strip("-")
             candidates = {
                 "composer_slug": f"{base_url}?platform={quote(platform_slug)}",
-                "stats_slug": (
+                "composer_id": f"{base_url}?platform={platform_id}",
+                "composer_platform_id": f"{base_url}?platformId={platform_id}",
+                "composer_platform_ids": f"{base_url}?platformIds={platform_id}",
+                "composer_platform_slug": f"{base_url}?platformSlug={quote(platform_slug)}",
+                "composer_exact_name": f"{base_url}?platform={quote(name)}",
+                "stats_platform_slug": (
                     f"{API_BASE}/reviews/metacritic/critic/games/{slug}/stats/web"
                     f"?componentName=critic-score-summary&componentType=MetaScoreSummary"
                     f"&platform={quote(platform_slug)}"
                 ),
-                "stats_id": (
+                "stats_platform_id": (
                     f"{API_BASE}/reviews/metacritic/critic/games/{slug}/stats/web"
                     f"?componentName=critic-score-summary&componentType=MetaScoreSummary"
                     f"&platformId={platform_id}"
+                ),
+                "stats_platform_ids": (
+                    f"{API_BASE}/reviews/metacritic/critic/games/{slug}/stats/web"
+                    f"?componentName=critic-score-summary&componentType=MetaScoreSummary"
+                    f"&platformIds={platform_id}"
+                ),
+                "stats_platform_slug_key": (
+                    f"{API_BASE}/reviews/metacritic/critic/games/{slug}/stats/web"
+                    f"?componentName=critic-score-summary&componentType=MetaScoreSummary"
+                    f"&platformSlug={quote(platform_slug)}"
                 ),
             }
             readings = {}
